@@ -1,0 +1,695 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Three.js SandBox: STACK Game</title>
+    <script type="text/javascript" src="js/three.js"></script>
+    <script type="text/javascript" src="js/jquery-1.9.0.js"></script>
+    <script type="text/javascript" src="js/dat.gui.min.js"></script>
+    <script type="text/javascript" src="js/webaudiox.js"></script>
+
+    <!-- remove entries that are not used -->
+    <script type="text/javascript" src="js/controls/OrbitControls.js"></script>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+        }
+    </style>
+</head>
+<body>
+    <div id="div3D"></div>
+
+    <!-- Javascript code -->
+    <script type="text/javascript">
+
+        var scene, camera, renderer;
+        var clock = new THREE.Clock();
+        var gui;
+        // Game Logic Variables
+        var isMovingOnX = true;
+        var isGameOver = false;
+        var highscore = 0;
+        var scoreCount = 0;
+        var combo = 0;
+        var stackIndex = 0;
+        var errorMargin = 0.01;
+        var stackBoundsGain = 0.25;
+        var comboGain = 3;
+
+        // Stack objects variables
+        var objects = [];
+        var dirt = [new THREE.Object3D];
+        var d1 = new THREE.Object3D();
+        var d2 = new THREE.Object3D();
+        var symbol = new THREE.Object3D();
+        var group = new THREE.Object3D();
+        var tileMeshes = [];
+        var boundsSize = 4;
+        var stackBounds = new THREE.Vector2(boundsSize, boundsSize);
+        var stackMoveSpeed = 5.0;
+        var tileSpeed = 2.5;
+        var tileTransition = 0.0;
+        var clicked = false;
+
+        var secondaryPosition = 0.0;
+
+        var desiredPosition = new THREE.Vector3(0, 0, 0);
+        var lastTilePosition = new THREE.Vector3(0, 0, 0);
+
+        // Gradien cube
+        var gradCube;
+        // Canvas
+        var canvas, ctx;
+        // Audio Spheres
+        var audioCircle;
+        var sphereArr = new THREE.Object3D();
+        var SArray = [];
+        var test;
+
+        $(function () {
+
+            // create the scene - the main object that contains everything else
+            scene = new THREE.Scene();
+
+            // create the camera, position it and point to the centre of the scene
+            camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.x = -40;
+            camera.position.y = 40;
+            camera.position.z = 30;
+            camera.lookAt(scene.position);
+
+            // create the render and set the size and other parameters
+            renderer = new THREE.WebGLRenderer();
+            renderer.setClearColor(0x000000);
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMapEnabled = true;
+
+
+            // create camera controls - Orbit
+            //controls = new THREE.OrbitControls(camera);
+
+            //// create the ground plane
+            //var planeGeometry = new THREE.PlaneGeometry(60, 60);
+            //var planeMaterial = new THREE.MeshLambertMaterial({ color: 0x00ff00 });
+            //var plane = new THREE.Mesh(planeGeometry, planeMaterial);
+
+            //// rotate / position the plane
+            //plane.rotation.x = -0.5 * Math.PI;
+
+            //// setup shadows
+            //plane.receiveShadow = true;
+
+            //// add the plane to the scene
+            //scene.add(plane);
+
+            // Stack Object Geometry & Material
+            var cubeGeometry = new THREE.CubeGeometry(stackBounds.x, 1, stackBounds.y);
+            var cubeMaterial = new THREE.MeshLambertMaterial({ color: 0xa07830 });
+
+            for (var i = 0; i < 12; i++) {
+                symbol = new THREE.Object3D();
+                //Create cube mesh
+                var cube = new THREE.Mesh(cubeGeometry, cubeMaterial);
+
+                symbol.add(cube);
+
+                objects.push(cube);
+                tileMeshes.push(cube);
+            }
+
+            // Set stack position
+            InitStack();
+            scene.add(group);
+
+            // add spotlight for the shadows
+            var spotLight = new THREE.SpotLight(0xffffff);
+            spotLight.rotateY(180);
+            spotLight.position.set(0, 60, 25);
+            spotLight.castShadow = true;
+            scene.add(spotLight);
+
+            // GUI
+            displaygui();
+
+            // Audio
+            Audio();
+            // Draw Sphere
+            DrawSpheres();
+
+            CreateGradientCubeArray();
+            graphics();
+
+            // TECHNICALITIES
+
+            // add the output of the renderer to the html element
+            $("#div3D").append(renderer.domElement);
+
+            // Display info
+            displayinfo();
+            // Display score
+            displayscore();
+
+            // JS Events
+            document.addEventListener('mousemove', onDocumentMouseMove, false);
+            //document.addEventListener('mousedown', onMouseDown, false);
+            document.addEventListener("keydown", Keyboard, false);
+            window.addEventListener('resize', onWindowResize, false);
+
+            // initiate rendering/animation loop
+            animate();
+        });
+        function Audio()
+        {
+            // Create webaudio api context
+            var context = new AudioContext();
+            // Create lineOut
+            var lineOut = new WebAudiox.LineOut(context);
+
+            var analyser = context.createAnalyser()
+            analyser.connect(lineOut.destination);
+            lineOut.destination = analyser;
+
+            // load a sound and play it immediatly
+            WebAudiox.loadBuffer(context, 'sounds/Ginkiha - Eos.mp3', function (buffer) {
+                // init AudioBufferSourceNode
+                var source = context.createBufferSource();
+                source.buffer = buffer;
+                source.loop = true;
+                source.connect(lineOut.destination);
+
+                // start the sound now
+                source.start(0);
+            });
+
+            // Analyser
+
+            analyser2volume = new WebAudiox.Analyser2Volume(analyser);
+
+            //// Create and add canvas
+            //canvas = document.createElement('canvas');
+            //canvas.style.position = 'absolute';
+            //canvas.style.top = '60px';
+            //canvas.style.left = '60px';
+            ////canvas.style.color = "#ff0000";
+            //canvas.width = window.innerWidth;
+            //canvas.height = window.innerHeight;
+            //ctx = canvas.getContext("2d");
+            //document.body.appendChild(canvas);
+        }
+        function DrawSpheres()
+        {
+           // Draw audio spheres
+            sphereArr = new THREE.Object3D();
+            //scene.add(sphereArr);
+
+            var radius = 10;
+            var segments = 64;
+
+            var spheregeo = new THREE.SphereGeometry(radius, segments, segments, 0, Math.PI * 2, 0, Math.PI * 2);
+            var spherematerial = new THREE.MeshPhongMaterial({
+                color: 0xffffff,
+                shading: THREE.FlatShading
+            });
+
+            for (var i = 0; i < 50; i++) {
+                var mesh = new THREE.Mesh(spheregeo, spherematerial);
+                mesh.position.set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize();
+                mesh.position.multiplyScalar(90 + (Math.random() * 150));
+                mesh.rotation.set(Math.random() * 2, Math.random() * 2, Math.random() * 2);
+                sphereArr.add(mesh);
+                SArray.push(mesh);
+            }
+
+
+            test = new THREE.Mesh(spheregeo, spherematerial);
+            test.position.set(80, -50, 20);
+            scene.add(test);
+
+            test2 = new THREE.Mesh(spheregeo, spherematerial);
+            test2.position.set(0, -50, -80);
+            scene.add(test2);
+        }
+        function AnimateAudioSpheres(inputVolume)
+        {
+            var scaleMultiplier = 10;
+            //sphereArr.rotation.x += 0.0040;
+            //sphereArr.rotation.z -= 0.0040;
+
+            //SArray[0].scale.set(volume, volume, volume);
+
+            for (var i = 0; i < 50; i++) {
+                SArray[i].scale.set(inputVolume * scaleMultiplier, inputVolume * scaleMultiplier, inputVolume * scaleMultiplier);
+            }
+            //sphereArr.scale.x = volume * 5;
+            //sphereArr.scale.y = volume * 5;
+            //sphereArr.scale.z = volume * 5;
+            //test.scale.set(volume * 1, volume * 1, volume * 1);
+            test.scale.set(inputVolume * scaleMultiplier, inputVolume * scaleMultiplier, inputVolume * scaleMultiplier);
+            test2.scale.set(inputVolume * scaleMultiplier, inputVolume * scaleMultiplier, inputVolume * scaleMultiplier);
+        }
+        function CreateGradientCubeArray()
+        {
+            cubeArr = new THREE.Object3D();
+
+            scene.add(cubeArr);
+
+            for (var i = 0; i < 100; i++) {
+                var cmesh = makeGradientCube(0xff0000, 0x00ff00, 4, 4, 4, 1.0);
+                cmesh.position.set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize();
+                cmesh.position.multiplyScalar(90 + (Math.random() * 100));
+                cmesh.rotation.set(Math.random() * 2, Math.random() * 2, Math.random() * 2);
+                cubeArr.add(cmesh);
+            }
+        }
+        function makeGradientCube(c1, c2, w, d, h, opacity) {
+            if (typeof opacity === 'undefined') opacity = 1.0;
+            if (typeof c1 === 'number') c1 = new THREE.Color(c1);
+            if (typeof c2 === 'number') c2 = new THREE.Color(c2);
+
+            var cubeGeometry = new THREE.CubeGeometry(w, h, d);
+
+            var cubeMaterial = new THREE.MeshPhongMaterial({
+                vertexColors: THREE.VertexColors
+            });
+
+            if (opacity < 1.0) {
+                cubeMaterial.opacity = opacity;
+                cubeMaterial.transparent = false;
+            }
+
+            for (var ix = 0; ix < 12; ++ix) {
+                if (ix == 4 || ix == 5) { //Top edge, all c2
+                    cubeGeometry.faces[ix].vertexColors = [c2, c2, c2];
+                }
+                else if (ix == 6 || ix == 7) { //Bottom edge, all c1
+                    cubeGeometry.faces[ix].vertexColors = [c1, c1, c1];
+                }
+                else if (ix % 2 == 0) { //First triangle on each side edge
+                    cubeGeometry.faces[ix].vertexColors = [c2, c1, c2];
+                }
+                else { //Second triangle on each side edge
+                    cubeGeometry.faces[ix].vertexColors = [c1, c1, c2];
+                }
+            }
+
+            return new THREE.Mesh(cubeGeometry, cubeMaterial);
+        }
+        function graphics() {
+            particle = new THREE.Object3D();
+
+            scene.add(particle);
+
+            var geometry = new THREE.TetrahedronGeometry(2, 0);
+
+            var material = new THREE.MeshPhongMaterial({
+                color: 0xffffff,
+                shading: THREE.FlatShading
+            });
+
+            for (var i = 0; i < 1000; i++) {
+                var mesh = new THREE.Mesh(geometry, material);
+                mesh.position.set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize();
+                mesh.position.multiplyScalar(90 + (Math.random() * 700));
+                mesh.rotation.set(Math.random() * 2, Math.random() * 2, Math.random() * 2);
+                particle.add(mesh);
+            }
+
+            var lights = [];
+            lights[0] = new THREE.DirectionalLight(0xffffff, 1);
+            lights[0].position.set(1, 0, 0);
+            lights[1] = new THREE.DirectionalLight(0x11E8BB, 1);
+            lights[1].position.set(0.75, 1, 0.5);
+            lights[2] = new THREE.DirectionalLight(0x8200C9, 1);
+            lights[2].position.set(-0.75, -1, 0.5);
+            scene.add(lights[0]);
+            scene.add(lights[1]);
+            scene.add(lights[2]);
+        }
+        function displayinfo() {
+            // info
+            info = document.createElement('info');
+            info.style.position = 'absolute';
+            info.style.bottom = '30px';
+            info.style.width = '100%';
+            info.style.fontSize = '20px';
+            info.style.textAlign = 'center';
+            info.style.color = '#fff';
+            info.style.fontWeight = 'bold';
+            info.style.backgroundColor = 'transparent';
+            info.style.zIndex = '1';
+            info.style.fontFamily = 'Monospace';
+            info.innerHTML = 'PRESS A TO PLAY / PRESS R TO PLAY AGAIN';
+            document.body.appendChild(info);
+        }
+        function displayscore() {
+            // score
+            scoreGUI = document.createElement('score');
+            scoreGUI.style.position = 'absolute';
+            scoreGUI.style.top = '60px';
+            scoreGUI.style.left = '30px';
+            scoreGUI.style.width = '100%';
+            scoreGUI.style.fontSize = '100px';
+            scoreGUI.style.textAlign = 'center';
+            scoreGUI.style.color = '#fff';
+            scoreGUI.style.fontWeight = 'bold';
+            scoreGUI.style.backgroundColor = 'transparent';
+            scoreGUI.style.zIndex = '1';
+            scoreGUI.style.fontFamily = 'Monospace';
+            scoreGUI.innerHTML = scoreCount;
+            document.body.appendChild(scoreGUI);
+
+            // highscore
+            hscoreGUI = document.createElement('score');
+            hscoreGUI.style.position = 'absolute';
+            hscoreGUI.style.top = '30px';
+            hscoreGUI.style.left = '30px';
+            hscoreGUI.style.width = '100%';
+            hscoreGUI.style.fontSize = '40px';
+            hscoreGUI.style.textAlign = 'left';
+            hscoreGUI.style.color = '#fff';
+            hscoreGUI.style.fontWeight = 'bold';
+            hscoreGUI.style.backgroundColor = 'transparent';
+            hscoreGUI.style.zIndex = '1';
+            hscoreGUI.style.fontFamily = 'Monospace';
+            hscoreGUI.innerHTML = 'HIGHSCORE: ' + highscore;
+            document.body.appendChild(hscoreGUI);
+
+            // combo
+            comboGUI = document.createElement('combo');
+            comboGUI.style.position = 'absolute';
+            comboGUI.style.top = '90px';
+            comboGUI.style.left = '30px';
+            comboGUI.style.width = '100%';
+            comboGUI.style.fontSize = '40px';
+            comboGUI.style.textAlign = 'left';
+            comboGUI.style.color = '#fff';
+            comboGUI.style.fontWeight = 'bold';
+            comboGUI.style.backgroundColor = 'transparent';
+            comboGUI.style.zIndex = '1';
+            comboGUI.style.fontFamily = 'Monospace';
+            comboGUI.innerHTML = 'COMBO: ' + combo;
+            //document.body.appendChild(comboGUI);
+        }
+        function displaygui() {
+            var gui = new dat.GUI();
+            var jar;
+
+            parameters = {
+                a: "#a07830",
+            }
+
+            //gui.add(parameters, 'a').name('SCORE');
+            var color = gui.addColor(parameters, 'a').name('STACK COLOR');
+            color.onChange(function (jar) { tileMeshes[1].material.color.setHex(jar.replace("#", "0x")); });
+            // Set stack initial color
+            //color.setValue("0x6b317d");
+
+            gui.open();
+        }
+        // Stack Functions
+        function GameUpdate(time) {
+            if (isGameOver == true) {
+                // Make stack group fall
+                group.position.y -= 0.5;
+                if(highscore < scoreCount)
+                    highscore = scoreCount;
+                console.log("Game Over: True");
+                return;
+            }
+
+            if (clicked) {
+                if (PlaceTile()) {
+                    SpawnTile();
+                    scoreCount++;
+                    clicked = false;
+                }
+                else {
+                    EndGame();
+                }
+            }
+
+            MoveTile(time);
+
+            var npos = new THREE.Vector3(desiredPosition.x, desiredPosition.y, desiredPosition.z);
+            group.position = npos;
+
+        }
+        function EndGame(time) {
+            isGameOver = true;
+        }
+
+        function InitStack() {
+            // Set game variables
+            isGameOver = false;
+            scoreCount = 0;
+            boundsSize = 4;
+            stackBounds.x = boundsSize;
+            stackBounds.y = boundsSize;
+            stackIndex = objects.length - 1;
+
+            for (var i = 0, len = objects.length; i < len; i++) {
+
+                var sym = objects[i];
+                sym.scale.set(stackBounds.x, 1, stackBounds.y);
+                sym.position.set(0, -1 + (-i), 0);
+                group.add(sym);
+            }
+
+        }
+
+        function MoveTile(time) {
+            tileTransition += time * tileSpeed;
+
+            if (isMovingOnX) {
+                //var newCubeMatrix = objects[stackIndex].matrix;
+                //newCubeMatrix.identity();
+                //newCubeMatrix.multiplyMatrices()
+                objects[stackIndex].position.set(Math.sin(tileTransition) * boundsSize, scoreCount, secondaryPosition);
+                //objects[stackIndex].position = new THREE.Vector3(Math.sin(tileTransition) * boundsSize, scoreCount, secondaryPosition);
+                //objects[stackIndex].updateMatrix();
+                //objects[stackIndex].rotateY(angle);
+            }
+            else {
+                objects[stackIndex].position.set(secondaryPosition, scoreCount, Math.sin(tileTransition) * boundsSize);
+                //objects[stackIndex].position = new THREE.Vector3(secondaryPosition, scoreCount, Math.sin(tileTransition) * boundsSize);
+                //objects[stackIndex].updateMatrix();
+            }
+        }
+
+        function SpawnTile() {
+            lastTilePosition = objects[stackIndex].position;
+            stackIndex--;
+
+            if (stackIndex < 0)
+                stackIndex = objects.length - 1;
+
+            var down = new THREE.Vector3(0, -1, 0);
+            desiredPosition = down * scoreCount;
+
+            objects[stackIndex].position.set(0, scoreCount, 0);
+            objects[stackIndex].scale.set(stackBounds.x, 1, stackBounds.y);
+        }
+
+        function PlaceTile() {
+            var t = objects[stackIndex];
+
+            // X Axis
+            if (isMovingOnX) {
+                var deltaX = lastTilePosition.x - t.position.x;
+                console.log("DELTA X : " + deltaX);
+                if (Math.abs(deltaX) > errorMargin) {
+                    console.log("DELTAX > ERROR MARGIN");
+                    // CUT TILE
+                    combo = 0;
+                    stackBounds.x -= Math.abs(deltaX);
+                    if (stackBounds.x <= 0) {
+                        return false;
+                    }
+
+                    var middle = lastTilePosition.x + t.position.x / 2;
+                    t.scale.set(stackBounds.x, 1, stackBounds.y);
+                    //CreateRubble(new THREE.Vector3((t.position.x > 0)
+                    //    ? t.position.x + (t.scale.x / 2)
+                    //    : t.position.x - (t.scale.x / 2)
+                    //    , t.position.y
+                    //    , t.position.z), new THREE.Vector3(Math.abs(deltaX), 1, t.scale.z));
+                    t.position.set(middle - (lastTilePosition.x / 2), scoreCount, lastTilePosition.z);
+                }
+                else {
+                    console.log("DELTAX < ERROR MARGIN");
+
+                    if (combo > comboGain) {
+                        stackBounds.x += stackBoundsGain;
+                        if (stackBounds.x > boundsSize)
+                            stackBounds.x = boundsSize;
+
+                        var middle = lastTilePosition.x + t.position.x / 2;
+                        t.scale.set(stackBounds.x, 1, stackBounds.y);
+                        t.position.set(middle - (lastTilePosition.x / 2), scoreCount, lastTilePosition.z);
+                    }
+                    combo++;
+                    t.position.set(lastTilePosition.x, scoreCount, lastTilePosition.z);
+
+                }
+            }
+            else {
+                // Z AXIS
+                var deltaZ = lastTilePosition.z - t.position.z;
+                if (Math.abs(deltaZ) > errorMargin) {
+                    // CUT TILE
+                    combo = 0;
+                    stackBounds.y -= Math.abs(deltaZ);
+                    if (stackBounds.y <= 0)
+                        return false;
+
+                    var middle = lastTilePosition.z + (t.position.z / 2);
+                    t.scale.set(stackBounds.x, 1, stackBounds.y);
+                    //CreateRubble(new THREE.Vector3(t.position.x)
+                    //    , t.position.y
+                    //    , (t.position.z > 0)
+                    //    ? t.position.z + (t.scale.z / 2)
+                    //    : t.position.z - (t.scale.z / 2)
+                    //    , new THREE.Vector3(Math.abs(deltaX), 1, t.scale.z));
+                    t.position.set(lastTilePosition.x, scoreCount, middle - (lastTilePosition.z / 2));
+
+                }
+                else {
+                    if (combo > comboGain) {
+                        if (stackBounds.x > boundsSize)
+                            stackBounds.x = boundsSize;
+
+                        stackBounds.y += stackBoundsGain;
+                        var middle = lastTilePosition.z + (t.position.z / 2);
+                        t.scale.set(stackBounds.x, scoreCount, stackBounds.y);
+                        t.position.set(lastTilePosition.x, scoreCount, middle - (lastTilePosition.z / 2));
+
+                    }
+                    combo++;
+                    t.position.set(lastTilePosition.x, scoreCount, lastTilePosition.z);
+                }
+            }
+
+            secondaryPosition = (isMovingOnX) ? t.position.x : t.position.z;
+            isMovingOnX = !isMovingOnX;
+
+            return true;
+        }
+
+        function CreateRubble(pos, scale) {
+            d1 = new THREE.Object3D();
+            // Create rubble mesh
+            var geo = new THREE.CubeGeometry(4, 1, 4);
+            var mat = new THREE.MeshLambertMaterial({ color: 0xff0000 });
+
+            var rubble = new THREE.Mesh(geo, mat);
+
+            d1.add(rubble);
+            dirt.push(d1);
+
+            tileMeshes.push(rubble);
+
+            // add rubble to scene
+            scene.add(d1);
+
+            // Set scale
+            rubble.scale.set(scale.x, scale.y, scale.z);
+            // Set position
+            rubble.position.set(pos.x, pos.y, pos.z);
+            // Set motion
+            //rubble.position.y -= 0.5;
+            //if (isMovingOnX)
+            //    rubble.position.x += 0.5;
+            //else
+            //    rubble.position.z -= 0.5;
+
+            console.log("RUBBLE CREATED.");
+        }
+
+        function moverubble() {
+            for (var i = 0; i < dirt.length; i++) {
+                console.log("MOVE RUBBLE");
+                dirt[i].position.x -= 0.5;
+            }
+        }
+
+        function lerp(a, b, c) {
+            return a + c * (b - a);
+        }
+
+        function animate() {
+            // Update score and highscore text
+            scoreGUI.innerHTML = scoreCount;
+            hscoreGUI.innerHTML = 'HIGHSCORE: ' + highscore;
+            comboGUI.innerHTML = 'COMBO: ' + combo;
+            // JavaScript stuff (mandatory)
+            requestAnimationFrame(animate);
+
+            // Clear canvas
+            //ctx.clearRect(0, 0, canvas.width, canvas.height);
+            // Get Volume
+            var volume = analyser2volume.rawValue();
+            //console.log("VOLUME: " + volume);
+            // up to you to find the colors you like
+            //ctx.fillStyle = 'rgb(' + Math.floor(255 - (volume * 1000)) + ', ' + Math.floor(255 - (volume * 1500)) + ', ' + Math.floor(256 - (volume * 1700)) + ')';
+            //ctx.fillStyle = 'rgb(' + Math.floor(100 * volume * 256) + ',0,0';
+            //ctx.fillStyle = 'blue';
+            // draw a circle
+            //var radius = 1 + volume * 400;
+            //ctx.beginPath();
+            //ctx.arc(canvas.width / 2, canvas.height / 2, radius, 0, Math.PI * 2, true);
+            //ctx.closePath();
+            //ctx.fill();
+
+            // Animate the camera
+            var delta = clock.getDelta();
+            //controls.update(delta);
+
+            //particle.rotation.x += 0.0000;
+            particle.rotation.y -= 0.0040;
+            cubeArr.rotation.y -= 0.0040;
+            cubeArr.rotation.x += 0.0040;
+
+            // Animate Audio Spheres
+            AnimateAudioSpheres(volume);
+
+            renderer.clear();
+            moverubble();
+
+            // Game Loop
+            GameUpdate(delta);
+
+            // render
+            renderer.render(scene, camera);
+        }
+
+        function onWindowResize(event) {
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+        }
+
+        function onDocumentMouseMove(event) {
+        }
+
+        function onMouseDown(event) {
+        }
+
+        function Keyboard(event) {
+            // Unicode Characters
+            // W = 87/ A = 65/ S = 83/D = 68
+            // Left Arrow = 37
+            // Up Arrow = 38
+            // Right Arrow = 39
+            // Down Arrow = 40
+            // Space = 32
+            // R = 82
+
+            if (event.keyCode == 65)
+                clicked = true;
+            if (event.keyCode == 82)
+                InitStack();
+        }
+
+    </script>
+</body>
+</html>
